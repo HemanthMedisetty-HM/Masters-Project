@@ -1,0 +1,327 @@
+import os
+import pandas as pd
+from textblob import TextBlob
+import matplotlib.pyplot as plt
+from datetime import datetime, timedelta
+import time
+from dateutil.parser import parse
+import numpy as np
+import nltk
+from nltk.sentiment import SentimentIntensityAnalyzer
+
+# Clearing the Screen
+os.system('cls')
+
+tweets = scrape(mention_account='CLEPolice', since="2023-09-01",
+                until="2023-10-01", 
+                interval=10, 
+                headless=True,
+                lang="en")
+
+
+Complete_Data  = pd.DataFrame(tweets, columns = ['UserScreenName', 'UserName', 'Timestamp', 'Text', 'Emojis', 'Tweet URL', 'Image link'])
+
+#Cleaning the Text Tweets
+import re
+
+def cleanText(text):
+    text = re.sub(r'@[A-Za-z0-9]+','',text)
+    text = re.sub(r'#','',text)
+    text = re.sub(r'RT[\s]+','',text)
+    text = re.sub(r'https?:\/\/\S+','',text)
+    text = re.sub(r'[.]+','',text)
+    #text = re.sub(r'[']+,'',text)
+
+    return text
+
+
+Complete_Data['Text'] = Complete_Data['Text'].apply(cleanText)
+
+#print(data_catch.Text)
+
+#Define and Apply Subjectivity and Polarity
+def  getSubjectivity(text):
+    return TextBlob(text).sentiment.subjectivity
+
+def getPolarity(text):
+    return TextBlob(text).sentiment.polarity
+
+#Subjectivity indicates how subjective or objective the statement is, but it doesn't directly classify statements as positive, negative, or neutral. You would primarily look at the polarity value for that classification.
+
+Complete_Data['Subjectivity'] = Complete_Data['Text'].apply(getSubjectivity)
+Complete_Data['Polarity'] = Complete_Data['Text'].apply(getPolarity)
+
+
+
+#Analysis Positive / Negative / Neutral
+def getAnalysis(value):
+    if(value < 0):
+        return 'Negative'
+    elif(value == 0):
+        return 'Neutral'
+    else:
+        return 'Positive'
+
+Complete_Data['Analysis'] = Complete_Data['Polarity'].apply(getAnalysis)
+
+
+#NLTK (Natural Language Toolkit)
+import nltk
+from nltk.sentiment import SentimentIntensityAnalyzer
+
+# Download the VADER lexicon if not already downloaded - Valence Aware Dictionary and sEntiment Reasoner
+#nltk.download('vader_lexicon') 
+
+
+# Create an instance of SentimentIntensityAnalyzer
+sia = SentimentIntensityAnalyzer()
+
+def  sentiment_scores(text):
+    return sia.polarity_scores(text)
+
+# Perform sentiment analysis
+Complete_Data['NTLK_Sentiment_Scores'] = Complete_Data['Text'].apply(sentiment_scores)
+
+########################################
+def  get_compound(text):
+    return text['compound']
+
+# Perform sentiment analysis
+Complete_Data['Compound_Value'] = Complete_Data['NTLK_Sentiment_Scores'].apply(get_compound)
+
+####################################################
+
+
+#Analysis Positive / Negative / Neutral
+def get_NTLK_Analysis(value):
+    if(value < -0.05):
+        return 'Negative'
+    elif(value > 0.05):
+        return 'Positive'
+    else:
+        return 'Neutral'
+
+Complete_Data['NTLK_Analysis'] = Complete_Data['Compound_Value'].apply(get_NTLK_Analysis)
+
+
+
+######################################################### PIE CHARTS ####################################################
+# Define a color map for sentiment categories
+colors = {'Positive': 'lightgreen', 'Negative': 'lightcoral', 'Neutral': 'lightskyblue'}
+
+TextBlob_sentiment_counts = Complete_Data['TextBlob_Sentiment'].value_counts()
+NTLK_sentiment_counts = Complete_Data['NTLK_Analysis'].value_counts()
+
+# Sort the data by sentiment categories
+TextBlob_sentiment_counts = TextBlob_sentiment_counts.reindex(index=['Positive', 'Negative', 'Neutral'])
+NTLK_sentiment_counts = NTLK_sentiment_counts.reindex(index=['Positive', 'Negative', 'Neutral'])
+
+# Create a figure with a single pie chart
+fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 6))
+
+# Labels for the sections of the pie chart
+ax1.labels = TextBlob_sentiment_counts.index
+ax2.labels = NTLK_sentiment_counts.index
+
+# Values for each section
+ax1.sizes = TextBlob_sentiment_counts.values
+ax2.sizes = NTLK_sentiment_counts.values
+
+# Define colors for each sentiment category in both charts
+ax1_colors = [colors[sentiment] for sentiment in ax1.labels]
+ax2_colors = [colors[sentiment] for sentiment in ax2.labels]
+
+# Explode the "Positive" section (you can adjust this for emphasis)
+explode = (0.1, 0, 0)
+
+# Calculate the percentages
+ax1.percentages = [f'{count} ({count / sum(ax1.sizes) * 100:.1f}%)' for count in ax1.sizes]
+ax2.percentages = [f'{count} ({count / sum(ax2.sizes) * 100:.1f}%)' for count in ax2.sizes]
+
+# Create the pie chart with labels, values, colors, and explosion
+ax1.pie(ax1.sizes, labels=ax1.labels +" " + ax1.percentages, colors=ax1_colors, autopct='%1.1f%%', startangle=140, explode=explode, shadow=True)
+ax2.pie(ax2.sizes, labels=ax2.labels +" " + ax2.percentages, colors=ax2_colors, autopct='%1.1f%%', startangle=140, explode=explode, shadow=True)
+
+# Add a title
+ax1.set_title('TextBlob Sentiment Analysis')
+ax2.set_title('NTLK Sentiment Analysis')
+
+# Set a main title for both subplots
+plt.suptitle('Seattle PD Sentiment Analysis Comparison', fontsize=16,fontweight='bold')
+
+
+
+
+# Display the percentages in a fancy way
+plt.gca().set_aspect('equal')  # Equal aspect ratio ensures that pie is drawn as a circle.
+plt.tight_layout()
+
+# Show the pie chart
+plt.show()
+
+######################################################### TEXT BLOB LINE CHARTS ####################################################
+
+# Now, let's create separate line charts for each sentiment category (Positive, Negative, Neutral).
+
+# Customize the color palette for the bars
+colors = {'Positive': 'blue', 'Neutral': 'orange', 'Negative': 'green'}
+
+# Group the data by month and sentiment
+grouped_data = Complete_Data.groupby(['Month', 'TextBlob_Sentiment']).size().unstack(fill_value=0)
+
+# Get the unique months in the data
+available_months = Complete_Data['Month'].unique()
+
+# Create a custom order for the available months
+custom_order = sorted(available_months, key=lambda x: datetime.strptime(x, "%B"))
+
+
+# Create separate line charts for each Text Blob sentiment category
+for sentiment in ['Positive', 'Negative', 'Neutral']:
+    plt.figure(figsize=(10, 6))
+    
+    # Filter data for the current sentiment
+    sentiment_data = grouped_data.loc[custom_order][sentiment]
+    
+    # Set custom x-axis ticks and labels
+    x_ticks = range(len(custom_order))
+    x_labels = custom_order
+    
+    ax = sentiment_data.plot(kind='line', color='blue', marker='o', linestyle='-', linewidth=2, markersize=8)
+    
+    # Set custom x-axis ticks and labels
+    ax.set_xticks(x_ticks)
+    ax.set_xticklabels(x_labels, rotation=45, fontsize=10)
+    
+    plt.xlabel('Month')
+    plt.ylabel('Count')
+    plt.title(f' TextBlob | {sentiment} | Sentiment Analysis per Month')
+    ax.set_facecolor('#f0f0f0')
+    ax.grid(axis='y', linestyle='--', alpha=0.6)
+    ax.set_axisbelow(True)
+    plt.title(f'TextBlob | {sentiment} | Sentiment Analysis per Month', fontsize=16, fontweight='bold', pad=20)
+    plt.show()
+
+
+
+
+########################################################### TEXT BLOB CLUSTERED COLUMN GRAPH #####################################
+
+# Create a clustered column graph with custom styling
+# plt.figure(figsize=(10, 6))
+ax = grouped_data.loc[custom_order].plot(kind='bar')
+
+# Set labels and title
+plt.xlabel('Month')
+plt.ylabel('Count')
+plt.title('TextBlob | Sentiment Analysis per Month')
+
+# Customize the legend
+plt.legend(title='Sentiment', labels=['Positive', 'Neutral', 'Negative'], fancybox=True)
+
+# Add count labels to each bar
+for p in ax.patches:
+    ax.annotate(str(int(p.get_height())), (p.get_x() + p.get_width() / 2., p.get_height()), ha='center', va='bottom')
+
+# Add a shadow effect
+ax.set_facecolor('#f0f0f0')
+
+# Add grid lines
+ax.grid(axis='y', linestyle='--', alpha=0.6)
+
+# Add a background color to the plot
+ax.set_axisbelow(True)
+ax.set_facecolor('#f0f0f0')
+
+# Add a title to the graph
+plt.title('TextBlob | Sentiment Analysis per Month', fontsize=16, fontweight='bold', pad=20)
+
+# Customize the tick labels
+ax.set_xticklabels(custom_order, rotation=45, fontsize=10)
+
+# Show the plot
+plt.show()
+
+
+######################################################### NTLK LINE CHARTS ####################################################
+
+# Now, let's create separate line charts for each sentiment category (Positive, Negative, Neutral).
+
+# Customize the color palette for the bars
+colors = {'Positive': 'blue', 'Neutral': 'orange', 'Negative': 'green'}
+
+# Group the data by month and sentiment
+grouped_data = Complete_Data.groupby(['Month', 'NTLK_Analysis']).size().unstack(fill_value=0)
+
+# Get the unique months in the data
+available_months = Complete_Data['Month'].unique()
+
+# Create a custom order for the available months
+custom_order = sorted(available_months, key=lambda x: datetime.strptime(x, "%B"))
+
+
+# Create separate line charts for each Text Blob sentiment category
+for sentiment in ['Positive', 'Negative', 'Neutral']:
+    plt.figure(figsize=(10, 6))
+    
+    # Filter data for the current sentiment
+    sentiment_data = grouped_data.loc[custom_order][sentiment]
+    
+    # Set custom x-axis ticks and labels
+    x_ticks = range(len(custom_order))
+    x_labels = custom_order
+    
+    ax = sentiment_data.plot(kind='line', color='blue', marker='o', linestyle='-', linewidth=2, markersize=8)
+    
+    # Set custom x-axis ticks and labels
+    ax.set_xticks(x_ticks)
+    ax.set_xticklabels(x_labels, rotation=45, fontsize=10)
+    
+    plt.xlabel('Month')
+    plt.ylabel('Count')
+    plt.title(f' NTLK | {sentiment} | Sentiment Analysis per Month')
+    ax.set_facecolor('#f0f0f0')
+    ax.grid(axis='y', linestyle='--', alpha=0.6)
+    ax.set_axisbelow(True)
+    plt.title(f'NTLK | {sentiment} | Sentiment Analysis per Month', fontsize=16, fontweight='bold', pad=20)
+    plt.show()
+
+
+########################################################### NTLK CLUSTERED COLUMN GRAPH #####################################
+
+# Create a clustered column graph with custom styling
+# plt.figure(figsize=(10, 6))
+ax = grouped_data.loc[custom_order].plot(kind='bar')
+
+# Set labels and title
+plt.xlabel('Month')
+plt.ylabel('Count')
+plt.title('NTLK | Sentiment Analysis per Month')
+
+# Customize the legend
+plt.legend(title='Sentiment', labels=['Positive', 'Neutral', 'Negative'], fancybox=True)
+
+# Add count labels to each bar
+for p in ax.patches:
+    ax.annotate(str(int(p.get_height())), (p.get_x() + p.get_width() / 2., p.get_height()), ha='center', va='bottom')
+
+# Add a shadow effect
+ax.set_facecolor('#f0f0f0')
+
+# Add grid lines
+ax.grid(axis='y', linestyle='--', alpha=0.6)
+
+# Add a background color to the plot
+ax.set_axisbelow(True)
+ax.set_facecolor('#f0f0f0')
+
+# Add a title to the graph
+plt.title('NTLK | Sentiment Analysis per Month', fontsize=16, fontweight='bold', pad=20)
+
+# Customize the tick labels
+ax.set_xticklabels(custom_order, rotation=45, fontsize=10)
+
+# Show the plot
+plt.show()
+
+
